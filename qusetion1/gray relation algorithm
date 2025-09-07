@@ -1,0 +1,99 @@
+import pandas as pd
+from statsmodels.tsa.stattools import grangercausalitytests
+import numpy as np
+from numpy import zeros, amax, amin, mean
+# 无量纲化
+def dimensionlessProcessing(df):
+    newDataFrame = pd.DataFrame(index=df.index)
+    columns = df.columns.tolist()
+    for c in columns:
+        d = df[c]
+        MAX = d.max()
+        MIN = d.min()
+        MEAN = d.mean()
+        newDataFrame[c] = ((d - MEAN) / (MAX - MIN)).tolist()
+    return newDataFrame
+
+def GRA_ONE(gray, m=0):
+    # 读取为df格式
+    gray = dimensionlessProcessing(gray)
+    # 标准化
+    std = gray.iloc[:, m]  # 为标准要素
+    gray.drop(str(m),axis=1,inplace=True)
+    ce = gray.iloc[:, 0:]  # 为比较要素
+    shape_n, shape_m = ce.shape[0], ce.shape[1]  # 计算行列
+
+    # 与标准要素比较，相减
+    a = zeros([shape_m, shape_n])
+    for i in range(shape_m):
+        for j in range(shape_n):
+            a[i, j] = abs(ce.iloc[j, i] - std[j])
+
+    # 取出矩阵中最大值与最小值
+    c, d = amax(a), amin(a)
+
+    # 计算值
+    result = zeros([shape_m, shape_n])
+    for i in range(shape_m):
+        for j in range(shape_n):
+            result[i, j] = (d + 0.5 * c) / (a[i, j] + 0.5 * c)
+
+    # 求均值，得到灰色关联值,并返回
+    result_list = [mean(result[i, :]) for i in range(shape_m)]
+    result_list.insert(m,1)
+    return pd.DataFrame(result_list)
+
+
+def GRA(DataFrame):
+    df = DataFrame.copy()
+    list_columns = [
+        str(s) for s in range(len(df.columns)) if s not in [None]
+    ]
+    df_local = pd.DataFrame(columns=list_columns)
+    df.columns=list_columns
+    for i in range(len(df.columns)):
+        df_local.iloc[:, i] = GRA_ONE(df, m=i)[0]
+    return df_local
+
+
+try:
+    # 读取Excel文件，指定行范围和列
+    df = pd.read_excel('NIPT清洗后数据.xlsx', 
+                      sheet_name='Sheet1', 
+                      engine='openpyxl',
+                      header=None,  # 不使用第一行作为列名
+                      usecols=[2,3,4],  # 读取2,3,4列
+                      skiprows=1,  # 跳过第一行
+                      nrows=612)  
+    
+    # 重命名列
+    df.columns = ['Y', 'Z', 'X']  # 按照C、D、E的顺序对应Y、Z、X
+    
+    # 检查数据是否读取成功
+    print("数据预览：")
+    print(df.head())
+    print("\n数据形状：", df.shape)
+    
+    # 检查并处理空值
+    if df.isnull().any().any():
+        print("\n警告：数据中存在空值，将进行填充处理")
+        df = df.fillna(method='ffill').fillna(method='bfill')
+    
+    # 确保数据是数值型
+    df = df.apply(pd.to_numeric, errors='coerce')
+    
+    # 创建两个数据集
+    data1 = df[['X', 'Y']]  # X和Y的数据
+    data2 = df[['X', 'Z']]  # X和Z的数据
+    
+    # 确保没有空值
+    data1 = data1.dropna()
+    data2 = data2.dropna()
+
+    print('孕周和染色体浓度关联：'+str(GRA(data1)))
+
+    print('BMI和染色体浓度关联: '+str(GRA(data2)))
+except FileNotFoundError:
+    print("错误：找不到文件 'NIPT清洗后数据.xlsx'")
+except Exception as e:
+    print(f"发生错误：{str(e)}")
